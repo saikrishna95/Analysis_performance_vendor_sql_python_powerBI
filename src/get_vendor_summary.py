@@ -1,159 +1,151 @@
-{
- "cells": [
-  {
-   "cell_type": "markdown",
-   "id": "48505188-0819-49d1-b426-b8da07cf2c4f",
-   "metadata": {},
-   "source": [
-    "## Making the new table summary as a script \n",
-    "Based on the intial EDA and the vendor summary we are making that as script"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "ccf16d89-08b0-47f2-b79c-428de286224b",
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "import sqlite3\n",
-    "import pandas as pd\n",
-    "import logging\n",
-    "logging.basicConfig(\n",
-    "    filename=\"logs/get_vendor_summary.log\", \n",
-    "    level=logging.DEBUG,\n",
-    "    format=\"%(asctime)s - %(levelname)s - %(message)s\", \n",
-    "    filemode=\"a\"  \n",
-    ")\n",
-    "\n",
-    "def ingest_db(df, table_name, engine):\n",
-    "    '''this function will ingest the dataframe into database table'''\n",
-    "    df.to_sql(table_name, con = engine, if_exists = 'replace', index = False)\n",
-    "    \n",
-    "def create_vendor_summary(conn):\n",
-    "    '''this function will merge the different tables to get the overall vendor summary and adding new columns in the resultant data'''\n",
-    "    vendor_sales_summary = pd.read_sql_query(\"\"\"WITH FreightSummary AS (\n",
-    "        SELECT \n",
-    "            VendorNumber, \n",
-    "            SUM(Freight) AS FreightCost \n",
-    "        FROM vendor_invoice \n",
-    "        GROUP BY VendorNumber\n",
-    "    ), \n",
-    "    \n",
-    "    PurchaseSummary AS (\n",
-    "        SELECT \n",
-    "            p.VendorNumber,\n",
-    "            p.VendorName,\n",
-    "            p.Brand,\n",
-    "            p.Description,\n",
-    "            p.PurchasePrice,\n",
-    "            pp.Price AS ActualPrice,\n",
-    "            pp.Volume,\n",
-    "            SUM(p.Quantity) AS TotalPurchaseQuantity,\n",
-    "            SUM(p.Dollars) AS TotalPurchaseDollars\n",
-    "        FROM purchases p\n",
-    "        JOIN purchase_prices pp\n",
-    "            ON p.Brand = pp.Brand\n",
-    "        WHERE p.PurchasePrice > 0\n",
-    "        GROUP BY p.VendorNumber, p.VendorName, p.Brand, p.Description, p.PurchasePrice, pp.Price, pp.Volume\n",
-    "    ), \n",
-    "    \n",
-    "    SalesSummary AS (\n",
-    "        SELECT \n",
-    "            VendorNo,\n",
-    "            Brand,\n",
-    "            SUM(SalesQuantity) AS TotalSalesQuantity,\n",
-    "            SUM(SalesDollars) AS TotalSalesDollars,\n",
-    "            SUM(SalesPrice) AS TotalSalesPrice,\n",
-    "            SUM(ExciseTax) AS TotalExciseTax\n",
-    "        FROM sales\n",
-    "        GROUP BY VendorNo, Brand\n",
-    "    ) \n",
-    "    \n",
-    "    SELECT \n",
-    "        ps.VendorNumber,\n",
-    "        ps.VendorName,\n",
-    "        ps.Brand,\n",
-    "        ps.Description,\n",
-    "        ps.PurchasePrice,\n",
-    "        ps.ActualPrice,\n",
-    "        ps.Volume,\n",
-    "        ps.TotalPurchaseQuantity,\n",
-    "        ps.TotalPurchaseDollars,\n",
-    "        ss.TotalSalesQuantity,\n",
-    "        ss.TotalSalesDollars,\n",
-    "        ss.TotalSalesPrice,\n",
-    "        ss.TotalExciseTax,\n",
-    "        fs.FreightCost\n",
-    "    FROM PurchaseSummary ps\n",
-    "    LEFT JOIN SalesSummary ss \n",
-    "        ON ps.VendorNumber = ss.VendorNo \n",
-    "        AND ps.Brand = ss.Brand\n",
-    "    LEFT JOIN FreightSummary fs \n",
-    "        ON ps.VendorNumber = fs.VendorNumber\n",
-    "    ORDER BY ps.TotalPurchaseDollars DESC\"\"\",conn)\n",
-    "\n",
-    "    return vendor_sales_summary\n",
-    "\n",
-    "\n",
-    "def clean_data(df):\n",
-    "    '''this function will clean the data'''\n",
-    "    # changing datatype to float\n",
-    "    df['Volume'] = df['Volume'].astype('float')\n",
-    "    \n",
-    "    # filling missing value with 0\n",
-    "    df.fillna(0,inplace = True)\n",
-    "    \n",
-    "    # removing spaces from categorical columns\n",
-    "    df['VendorName'] = df['VendorName'].str.strip()\n",
-    "    df['Description'] = df['Description'].str.strip()\n",
-    "\n",
-    "    # creating new columns for better analysis\n",
-    "    df['GrossProfit'] = df['TotalSalesDollars'] - df['TotalPurchaseDollars']\n",
-    "    df['ProfitMargin'] = (df['GrossProfit'] / df['TotalSalesDollars'])*100\n",
-    "    df['StockTurnover'] = df['TotalSalesQuantity'] / df['TotalPurchaseQuantity']\n",
-    "    df['SalesToPurchaseRatio'] = df['TotalSalesDollars'] / df['TotalPurchaseDollars']\n",
-    "\n",
-    "    \n",
-    "    return df\n",
-    "\n",
-    "if __name__ == '__main__':\n",
-    "    # creating database connection\n",
-    "    conn = sqlite3.connect('inventory1.db')\n",
-    "    \n",
-    "    logging.info('Creating Vendor Summary Table.....')\n",
-    "    summary_df = create_vendor_summary(conn)\n",
-    "    logging.info(summary_df.head())\n",
-    "    \n",
-    "    logging.info('Cleaning Data.....')\n",
-    "    clean_df = clean_data(summary_df)\n",
-    "    logging.info(clean_df.head())\n",
-    "    \n",
-    "    logging.info('Ingesting data.....')\n",
-    "    ingest_db(clean_df,'vendor_sales_summary',conn)\n",
-    "    logging.info('Completed')"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3 (ipykernel)",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.13.7"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+
+"""
+Making the new table summary as a script
+Based on the initial EDA and the vendor summary we are making that as script
+"""
+
+import sqlite3
+import pandas as pd
+import logging
+import numpy as np
+
+logging.basicConfig(
+    filename="logs/get_vendor_summary.log",
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filemode="a"
+)
+
+
+def ingest_db(df: pd.DataFrame, table_name: str, conn: sqlite3.Connection) -> None:
+    """Ingest the dataframe into a database table."""
+    df.to_sql(table_name, con=conn, if_exists="replace", index=False)
+
+
+def create_vendor_summary(conn: sqlite3.Connection) -> pd.DataFrame:
+    """
+    Merge the different tables to get the overall vendor summary
+    and return the resultant dataframe.
+    """
+    query = """
+    WITH FreightSummary AS (
+        SELECT
+            VendorNumber,
+            SUM(Freight) AS FreightCost
+        FROM vendor_invoice
+        GROUP BY VendorNumber
+    ),
+
+    PurchaseSummary AS (
+        SELECT
+            p.VendorNumber,
+            p.VendorName,
+            p.Brand,
+            p.Description,
+            p.PurchasePrice,
+            pp.Price AS ActualPrice,
+            pp.Volume,
+            SUM(p.Quantity) AS TotalPurchaseQuantity,
+            SUM(p.Dollars) AS TotalPurchaseDollars
+        FROM purchases p
+        JOIN purchase_prices pp
+            ON p.Brand = pp.Brand
+        WHERE p.PurchasePrice > 0
+        GROUP BY
+            p.VendorNumber, p.VendorName, p.Brand, p.Description,
+            p.PurchasePrice, pp.Price, pp.Volume
+    ),
+
+    SalesSummary AS (
+        SELECT
+            VendorNo,
+            Brand,
+            SUM(SalesQuantity) AS TotalSalesQuantity,
+            SUM(SalesDollars) AS TotalSalesDollars,
+            SUM(SalesPrice) AS TotalSalesPrice,
+            SUM(ExciseTax) AS TotalExciseTax
+        FROM sales
+        GROUP BY VendorNo, Brand
+    )
+
+    SELECT
+        ps.VendorNumber,
+        ps.VendorName,
+        ps.Brand,
+        ps.Description,
+        ps.PurchasePrice,
+        ps.ActualPrice,
+        ps.Volume,
+        ps.TotalPurchaseQuantity,
+        ps.TotalPurchaseDollars,
+        ss.TotalSalesQuantity,
+        ss.TotalSalesDollars,
+        ss.TotalSalesPrice,
+        ss.TotalExciseTax,
+        fs.FreightCost
+    FROM PurchaseSummary ps
+    LEFT JOIN SalesSummary ss
+        ON ps.VendorNumber = ss.VendorNo
+        AND ps.Brand = ss.Brand
+    LEFT JOIN FreightSummary fs
+        ON ps.VendorNumber = fs.VendorNumber
+    ORDER BY ps.TotalPurchaseDollars DESC
+    """
+    return pd.read_sql_query(query, conn)
+
+
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Clean the data and add derived metrics."""
+    df = df.copy()
+
+    # Convert datatypes
+    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+
+    # Fill missing values
+    df.fillna(0, inplace=True)
+
+    # Trim strings
+    df["VendorName"] = df["VendorName"].astype(str).str.strip()
+    df["Description"] = df["Description"].astype(str).str.strip()
+
+    # Derived metrics
+    df["GrossProfit"] = df["TotalSalesDollars"] - df["TotalPurchaseDollars"]
+
+    # Avoid division by zero for profit margin
+    df["ProfitMargin"] = np.where(
+        df["TotalSalesDollars"] != 0,
+        (df["GrossProfit"] / df["TotalSalesDollars"]) * 100,
+        0
+    )
+
+    df["StockTurnover"] = np.where(
+        df["TotalPurchaseQuantity"] != 0,
+        df["TotalSalesQuantity"] / df["TotalPurchaseQuantity"],
+        0
+    )
+
+    df["SalesToPurchaseRatio"] = np.where(
+        df["TotalPurchaseDollars"] != 0,
+        df["TotalSalesDollars"] / df["TotalPurchaseDollars"],
+        0
+    )
+
+    return df
+
+
+if __name__ == "__main__":
+    conn = sqlite3.connect("inventory1.db")
+
+    logging.info("Creating Vendor Summary Table.....")
+    summary_df = create_vendor_summary(conn)
+    logging.info(summary_df.head().to_string())
+
+    logging.info("Cleaning Data.....")
+    clean_df = clean_data(summary_df)
+    logging.info(clean_df.head().to_string())
+
+    logging.info("Ingesting data.....")
+    ingest_db(clean_df, "vendor_sales_summary", conn)
+
+    logging.info("Completed")
+    conn.close()

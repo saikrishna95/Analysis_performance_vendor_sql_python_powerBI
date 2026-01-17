@@ -1,82 +1,63 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "b21cf645-5025-4d31-ab53-151aac668c66",
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# Using this script to save csv files into database with their filename as tablename\n",
-    "\n",
-    "#importing required lib\n",
-    "import pandas as pd\n",
-    "import os\n",
-    "from sqlalchemy import create_engine\n",
-    "import logging\n",
-    "import time\n",
-    "\n",
-    "#adding a logger\n",
-    "logging.basicConfig(\n",
-    "    filename=\"logs/ingestion_db.log\", \n",
-    "    level=logging.DEBUG,\n",
-    "    format=\"%(asctime)s - %(levelname)s - %(message)s\", \n",
-    "    filemode=\"a\"  \n",
-    ")\n",
-    "\n",
-    "#creating an engine\n",
-    "engine = create_engine('sqlite:///inventory1.db')\n",
-    "\n",
-    "\n",
-    "#defining function to injest data to db\n",
-    "def ingest_db(df, table_name, engine):\n",
-    "    '''this function will ingest the dataframe into database table'''\n",
-    "    df.to_sql(table_name, con = engine, if_exists = 'replace', index = False)\n",
-    "\n",
-    "# defining function to load the data\n",
-    "def load_raw_data():\n",
-    "    '''this function will load the CSVs as dataframe and ingest into db'''\n",
-    "    start = time.time()\n",
-    "    for file in os.listdir('data'):\n",
-    "        if '.csv' in file:\n",
-    "            df = pd.read_csv('data/'+file)\n",
-    "            logging.info(f'Ingesting {file} in db')\n",
-    "            ingest_db(df, file[:-4], engine)\n",
-    "            \n",
-    "        except Exception as e:\n",
-    "            logging.error(f\"-------------------Failed to ingest {file}: {e}-------------------\")\n",
-    "            logging.debug(traceback.format_exc()) #full trace\n",
-    "        \n",
-    "    end = time.time()\n",
-    "    total_time = (end - start)/60\n",
-    "    logging.info('--------------Ingestion Complete------------')\n",
-    "    \n",
-    "    logging.info(f'\\nTotal Time Taken: {total_time} minutes')\n",
-    "\n",
-    "if __name__ == '__main__':\n",
-    "    load_raw_data()\n"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3 (ipykernel)",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.13.7"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+
+# Using this script to save CSV files into database with their filename as tablename
+
+# importing required libraries
+import pandas as pd
+import os
+from sqlalchemy import create_engine
+import logging
+import time
+import traceback
+
+# adding a logger
+logging.basicConfig(
+    filename="logs/ingestion_db.log",
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filemode="a"
+)
+
+# creating a database engine
+engine = create_engine("sqlite:///inventory1.db")
+
+
+def ingest_db(df, table_name, engine):
+    """
+    This function will ingest the dataframe into a database table
+    """
+    df.to_sql(
+        table_name,
+        con=engine,
+        if_exists="replace",
+        index=False
+    )
+
+
+def load_raw_data():
+    """
+    This function will load the CSVs as dataframe and ingest them into the DB
+    """
+    start = time.time()
+
+    for file in os.listdir("data"):
+        try:
+            if file.endswith(".csv"):
+                df = pd.read_csv(os.path.join("data", file))
+                logging.info(f"Ingesting {file} into database")
+                ingest_db(df, file[:-4], engine)
+
+        except Exception as e:
+            logging.error(
+                f"------------------- Failed to ingest {file}: {e} -------------------"
+            )
+            logging.debug(traceback.format_exc())
+
+    end = time.time()
+    total_time = (end - start) / 60
+
+    logging.info("-------------- Ingestion Complete ------------")
+    logging.info(f"Total Time Taken: {total_time:.2f} minutes")
+
+
+if __name__ == "__main__":
+    load_raw_data()
